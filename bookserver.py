@@ -2713,6 +2713,16 @@ button:active{background:var(--btnact)}
     <button class="tbtn" type="button" data-t="light">白</button>
     <button class="tbtn" type="button" data-t="green">绿</button>
     <button class="tbtn" type="button" data-t="dark">暗</button></div>
+  <div class="prow"><span class="plab">翻页</span>
+    <select id="flipMode">
+      <option value="std">标准（左右分区）</option>
+      <option value="one">单手（半屏点按）</option>
+      <option value="float">悬浮按钮</option>
+    </select></div>
+  <div class="prow"><span class="plab">跳转</span>
+    <input id="jumpVal" type="number" min="1" step="1" inputmode="numeric" placeholder="页码">
+    <select id="jumpUnit"><option value="page">页</option><option value="pct">%</option></select>
+    <button id="jumpBtn" type="button">跳转</button></div>
   <div class="prow"><span class="plab">朗读</span>
     <button id="ttsBtn" type="button">开始朗读</button>
     <select id="ttsRate">
@@ -2956,6 +2966,69 @@ document.getElementById("fminus").onclick = function(){ applyFont(curFont - FONT
 document.getElementById("fplus").onclick = function(){ applyFont(curFont + FONT_STEP, true) };
 document.getElementById("back").onclick = function(){ location.href = "/" };
 
+/* ---------- 翻页模式（标准 / 单手 / 悬浮按钮）· 跳转 · 音量键 ---------- */
+var FLIP_MODE = "std";
+try { var _fm = localStorage.getItem("bookFlipMode"); if (_fm === "std" || _fm === "one" || _fm === "float") FLIP_MODE = _fm; } catch(e){}
+function volKey(e){
+  var c = e.keyCode || e.which || 0, k = e.key || "";
+  if (c === 24 || k === "VolumeUp" || k === "AudioVolumeUp") return 1;
+  if (c === 25 || k === "VolumeDown" || k === "AudioVolumeDown") return -1;
+  return 0;
+}
+function xToast(msg){
+  var t = document.createElement("div");
+  t.style.cssText = "position:fixed;left:50%;top:64px;transform:translateX(-50%);z-index:120;padding:8px 14px;border-radius:10px;background:rgba(0,0,0,.78);color:#fff;font-size:13px;white-space:nowrap";
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function(){ if (t.parentNode) t.parentNode.removeChild(t); }, 2000);
+}
+function applyFlipMode(m){
+  if (m !== "std" && m !== "one" && m !== "float") m = "std";
+  FLIP_MODE = m;
+  try { localStorage.setItem("bookFlipMode", m); } catch(e){}
+  var sel = document.getElementById("flipMode"); if (sel) sel.value = m;
+  var fl = document.getElementById("floats");
+  if (fl) fl.classList.toggle("hide", m !== "float");
+  var pgc = document.getElementById("pages");
+  if (pgc) pgc.style.paddingBottom = (m === "float") ? "66px" : "";
+  if (typeof paginate === "function" && typeof P !== "undefined" && P.length){
+    setTimeout(function(){ paginate(true); }, 0);
+  }
+}
+(function(){
+  var bar = document.createElement("div");
+  bar.id = "floats"; bar.className = "hide";
+  bar.style.cssText = "position:fixed;left:0;right:0;bottom:10px;display:flex;gap:10px;padding:0 12px;z-index:70;pointer-events:none";
+  bar.innerHTML = '<button id="fPrev" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">上一页</button>'
+    + '<button id="fNext" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">下一页</button>';
+  document.body.appendChild(bar);
+  document.getElementById("fPrev").onclick = function(){ panel.classList.add("hide"); prevPage(); };
+  document.getElementById("fNext").onclick = function(){ panel.classList.add("hide"); nextPage(); };
+})();
+document.getElementById("flipMode").onchange = function(){ applyFlipMode(this.value); };
+var _jv = document.getElementById("jumpVal");
+if (_jv) _jv.style.cssText = "width:74px;padding:8px;font-size:13px;border-radius:8px;border:1px solid var(--bd,#ccc);background:transparent;color:inherit";
+var _ju = document.getElementById("jumpUnit");
+if (_ju) _ju.style.cssText = "padding:8px;font-size:13px;border-radius:8px;border:1px solid var(--bd,#ccc);background:transparent;color:inherit";
+function doJump(){
+  var el = document.getElementById("jumpVal"), v = parseFloat(el.value);
+  if (!isFinite(v) || v <= 0){ xToast("请输入页码或百分比"); return; }
+  var unit = document.getElementById("jumpUnit").value;
+  if (unit === "pct"){
+    v = Math.max(0, Math.min(100, v));
+    showPage(Math.round(v / 100 * (total - 1)));
+  } else {
+    if (v > total) xToast("本书共 " + total + " 页");
+    showPage(Math.round(v) - 1);
+  }
+  panel.classList.add("hide");
+}
+document.getElementById("jumpBtn").onclick = doJump;
+document.getElementById("jumpVal").addEventListener("keydown", function(e){
+  if (e.key === "Enter"){ e.preventDefault(); doJump(); }
+});
+applyFlipMode(FLIP_MODE);
+
 /* ---------- 目录（章节识别结果，借鉴开源阅读） ---------- */
 var tocWrap = document.getElementById("tocWrap");
 var tocList = document.getElementById("tocList");
@@ -3004,10 +3077,13 @@ pages.addEventListener("touchend", function(e){
 pages.addEventListener("click", function(e){
   if (Date.now() - tMoved < 400) return;
   var w = pages.clientWidth;
+  if (FLIP_MODE === "one"){ if (e.clientX < w * 0.5) prevPage(); else nextPage(); return; }
   if (e.clientX < w * 0.38) prevPage();
   else if (e.clientX > w * 0.62) nextPage();
 });
 document.addEventListener("keydown", function(e){
+  var vk = volKey(e);
+  if (vk){ e.preventDefault(); if (vk > 0) nextPage(); else prevPage(); return; }
   if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); nextPage(); }
   else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); prevPage(); }
 });
@@ -3203,6 +3279,16 @@ button:active{background:var(--btnact)}
     <button class="tbtn" type="button" data-t="light">白</button>
     <button class="tbtn" type="button" data-t="green">绿</button>
     <button class="tbtn" type="button" data-t="dark">暗</button></div>
+  <div class="prow"><span class="plab">翻页</span>
+    <select id="flipMode">
+      <option value="std">标准（左右分区）</option>
+      <option value="one">单手（半屏点按）</option>
+      <option value="float">悬浮按钮</option>
+    </select></div>
+  <div class="prow"><span class="plab">跳转</span>
+    <input id="jumpVal" type="number" min="1" step="1" inputmode="numeric" placeholder="页码">
+    <select id="jumpUnit"><option value="page">本章页</option><option value="pct">全书%</option></select>
+    <button id="jumpBtn" type="button">跳转</button></div>
   <div class="prow"><span class="plab">朗读</span>
     <button id="ttsBtn" type="button">开始朗读</button>
     <select id="ttsRate">
@@ -3516,6 +3602,73 @@ markFam();
 document.getElementById("fminus").onclick=function(){ applyFont(curFont-FONT_STEP,true); };
 document.getElementById("fplus").onclick=function(){ applyFont(curFont+FONT_STEP,true); };
 document.getElementById("back").onclick=function(){ location.href="/"; };
+
+/* ---------- 翻页模式（标准 / 单手 / 悬浮按钮）· 跳转 · 音量键 ---------- */
+var FLIP_MODE="std";
+try{ var _fm=localStorage.getItem("bookFlipMode"); if(_fm==="std"||_fm==="one"||_fm==="float") FLIP_MODE=_fm; }catch(e){}
+function volKey(e){
+  var c=e.keyCode||e.which||0,k=e.key||"";
+  if(c===24||k==="VolumeUp"||k==="AudioVolumeUp") return 1;
+  if(c===25||k==="VolumeDown"||k==="AudioVolumeDown") return -1;
+  return 0;
+}
+function xToast(msg){
+  var t=document.createElement("div");
+  t.style.cssText="position:fixed;left:50%;top:64px;transform:translateX(-50%);z-index:120;padding:8px 14px;border-radius:10px;background:rgba(0,0,0,.78);color:#fff;font-size:13px;white-space:nowrap";
+  t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(function(){ if(t.parentNode) t.parentNode.removeChild(t); },2000);
+}
+function applyFlipMode(m){
+  if(m!=="std"&&m!=="one"&&m!=="float") m="std";
+  FLIP_MODE=m;
+  try{ localStorage.setItem("bookFlipMode",m); }catch(e){}
+  var sel=document.getElementById("flipMode"); if(sel) sel.value=m;
+  var fl=document.getElementById("floats"); if(fl) fl.classList.toggle("hide",m!=="float");
+  var pgc=document.getElementById("pages");
+  if(pgc) pgc.style.paddingBottom=(m==="float")?"66px":"";
+  if(typeof paginate==="function"&&typeof P!=="undefined"&&P.length){
+    setTimeout(function(){ paginate(true); },0);
+  }
+}
+(function(){
+  var bar=document.createElement("div");
+  bar.id="floats"; bar.className="hide";
+  bar.style.cssText="position:fixed;left:0;right:0;bottom:10px;display:flex;gap:10px;padding:0 12px;z-index:70;pointer-events:none";
+  bar.innerHTML='<button id="fPrev" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">上一页</button>'
+    +'<button id="fNext" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">下一页</button>';
+  document.body.appendChild(bar);
+  document.getElementById("fPrev").onclick=function(){ panel.classList.add("hide"); prevPage(); };
+  document.getElementById("fNext").onclick=function(){ panel.classList.add("hide"); nextPage(); };
+})();
+document.getElementById("flipMode").onchange=function(){ applyFlipMode(this.value); };
+var _jv=document.getElementById("jumpVal");
+if(_jv) _jv.style.cssText="width:74px;padding:8px;font-size:13px;border-radius:8px;border:1px solid var(--bd,#ccc);background:transparent;color:inherit";
+var _ju=document.getElementById("jumpUnit");
+if(_ju) _ju.style.cssText="padding:8px;font-size:13px;border-radius:8px;border:1px solid var(--bd,#ccc);background:transparent;color:inherit";
+function doJump(){
+  var el=document.getElementById("jumpVal"), v=parseFloat(el.value);
+  if(!isFinite(v)||v<=0){ xToast("请输入页码或百分比"); return; }
+  var unit=document.getElementById("jumpUnit").value;
+  if(unit==="pct"){
+    v=Math.max(0,Math.min(100,v));
+    var p=v/100, ch=Math.floor(p*totalChapters);
+    if(ch>totalChapters-1) ch=totalChapters-1;
+    if(ch<0) ch=0;
+    var r=p*totalChapters-ch;
+    if(r<0) r=0; if(r>1) r=1;
+    loadChapter(ch,r);
+  }else{
+    if(v>total) xToast("本章共 "+total+" 页");
+    showPage(Math.round(v)-1);
+  }
+  panel.classList.add("hide");
+}
+document.getElementById("jumpBtn").onclick=doJump;
+document.getElementById("jumpVal").addEventListener("keydown",function(e){
+  if(e.key==="Enter"){ e.preventDefault(); doJump(); }
+});
+applyFlipMode(FLIP_MODE);
 if(document.fonts){
   var _fontReT=0;
   document.fonts.addEventListener("loadingdone",function(){
@@ -3533,9 +3686,12 @@ pages.addEventListener("touchend",function(e){
 pages.addEventListener("click",function(e){
   if(Date.now()-tMoved<400)return;
   var w=pages.clientWidth;
+  if(FLIP_MODE==="one"){ if(e.clientX<w*0.5)prevPage(); else nextPage(); return; }
   if(e.clientX<w*0.38)prevPage(); else if(e.clientX>w*0.62)nextPage();
 });
 document.addEventListener("keydown",function(e){
+  var vk=volKey(e);
+  if(vk){ e.preventDefault(); if(vk>0)nextPage(); else prevPage(); return; }
   if(e.key==="ArrowRight"||e.key==="ArrowDown"||e.key==="PageDown"||e.key===" "){ e.preventDefault(); nextPage(); }
   else if(e.key==="ArrowLeft"||e.key==="ArrowUp"||e.key==="PageUp"){ e.preventDefault(); prevPage(); }
 });
@@ -3705,6 +3861,16 @@ button:active{background:var(--btnact)}
     <button class="tbtn" type="button" data-t="light">白</button>
     <button class="tbtn" type="button" data-t="green">绿</button>
     <button class="tbtn" type="button" data-t="dark">暗</button></div>
+  <div class="prow"><span class="plab">翻页</span>
+    <select id="flipMode">
+      <option value="std">标准（左右分区）</option>
+      <option value="one">单手（半屏点按）</option>
+      <option value="float">悬浮按钮</option>
+    </select></div>
+  <div class="prow"><span class="plab">跳转</span>
+    <input id="jumpVal" type="number" min="1" step="1" inputmode="numeric" placeholder="章节号">
+    <select id="jumpUnit"><option value="chap">章节</option><option value="pct">全书%</option></select>
+    <button id="jumpBtn" type="button">跳转</button></div>
   <div class="prow"><span class="plab">朗读</span>
     <button id="ttsBtn" type="button">开始朗读</button>
     <select id="ttsRate">
@@ -3948,6 +4114,73 @@ Array.prototype.forEach.call(document.querySelectorAll(".ffbtn"), function(b){
   b.onclick = function(){ applyFontFam(b.getAttribute("data-f")) };
 });
 
+/* ---------- 翻页模式（标准 / 单手 / 悬浮按钮）· 跳转 · 音量键 ---------- */
+var FLIP_MODE = "std";
+try { var _fm = localStorage.getItem("bookFlipMode"); if (_fm === "std" || _fm === "one" || _fm === "float") FLIP_MODE = _fm; } catch(e){}
+function volKey(e){
+  var c = e.keyCode || e.which || 0, k = e.key || "";
+  if (c === 24 || k === "VolumeUp" || k === "AudioVolumeUp") return 1;
+  if (c === 25 || k === "VolumeDown" || k === "AudioVolumeDown") return -1;
+  return 0;
+}
+function xToast(msg){
+  var t = document.createElement("div");
+  t.style.cssText = "position:fixed;left:50%;top:64px;transform:translateX(-50%);z-index:120;padding:8px 14px;border-radius:10px;background:rgba(0,0,0,.78);color:#fff;font-size:13px;white-space:nowrap";
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function(){ if (t.parentNode) t.parentNode.removeChild(t); }, 2000);
+}
+function applyFlipMode(m){
+  if (m !== "std" && m !== "one" && m !== "float") m = "std";
+  FLIP_MODE = m;
+  try { localStorage.setItem("bookFlipMode", m); } catch(e){}
+  var sel = document.getElementById("flipMode"); if (sel) sel.value = m;
+  var fl = document.getElementById("floats");
+  if (fl) fl.classList.toggle("hide", m !== "float");
+  var pgc = document.getElementById("pages");
+  if (pgc) pgc.style.paddingBottom = (m === "float") ? "66px" : "";
+  if (typeof paginate === "function" && typeof P !== "undefined" && P.length){
+    setTimeout(function(){ paginate(true); }, 0);
+  }
+}
+(function(){
+  var bar = document.createElement("div");
+  bar.id = "floats"; bar.className = "hide";
+  bar.style.cssText = "position:fixed;left:0;right:0;bottom:10px;display:flex;gap:10px;padding:0 12px;z-index:70;pointer-events:none";
+  bar.innerHTML = '<button id="fPrev" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">上一页</button>'
+    + '<button id="fNext" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">下一页</button>';
+  document.body.appendChild(bar);
+  document.getElementById("fPrev").onclick = function(){ panel.classList.add("hide"); flip("prev"); };
+  document.getElementById("fNext").onclick = function(){ panel.classList.add("hide"); flip("next"); };
+})();
+document.getElementById("flipMode").onchange = function(){ applyFlipMode(this.value); };
+var _jv = document.getElementById("jumpVal");
+if (_jv) _jv.style.cssText = "width:74px;padding:8px;font-size:13px;border-radius:8px;border:1px solid var(--bd,#ccc);background:transparent;color:inherit";
+var _ju = document.getElementById("jumpUnit");
+if (_ju) _ju.style.cssText = "padding:8px;font-size:13px;border-radius:8px;border:1px solid var(--bd,#ccc);background:transparent;color:inherit";
+function doJump(){
+  var el = document.getElementById("jumpVal"), v = parseFloat(el.value);
+  if (!isFinite(v) || v <= 0){ xToast("请输入章节号或百分比"); return; }
+  var unit = document.getElementById("jumpUnit").value;
+  if (unit === "pct"){
+    jumpTo(Math.max(0, Math.min(100, v)) / 100);
+  } else {
+    var n = (book.spine && book.spine.length) ? book.spine.length : 0;
+    if (!n){ xToast("书还没加载完，稍后再试"); return; }
+    var idx = Math.round(v) - 1;
+    if (idx < 0) idx = 0;
+    if (idx > n - 1){ idx = n - 1; xToast("本书共 " + n + " 章"); }
+    var sec = book.spine.get(idx);
+    if (sec){ try { rendition.display(sec.href); } catch(e){} ; setTimeout(refreshPos, 500); }
+  }
+  panel.classList.add("hide");
+}
+document.getElementById("jumpBtn").onclick = doJump;
+document.getElementById("jumpVal").addEventListener("keydown", function(e){
+  if (e.key === "Enter"){ e.preventDefault(); doJump(); }
+});
+applyFlipMode(FLIP_MODE);
+
 /* ---------- 阅读进度 ---------- */
 /* REL 已在脚本开头按 location.pathname 算出 */
 var LAST_LOC = null, TM = null, SEC = 0, opened = false, BASE_T = 0, SEEN_T = 0;
@@ -4110,10 +4343,13 @@ function flip(dir){
 }
 /* 键盘翻页：左右方向键 / PageUp·PageDown / 空格 */
 document.addEventListener("keydown", function(e){
+  var vk = volKey(e);
+  if (vk){ e.preventDefault(); flip(vk > 0 ? "next" : "prev"); return; }
   if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); flip("next"); }
   else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); flip("prev"); }
 });
 function tapZone(x, w){
+  if (FLIP_MODE === "one"){ if (x < w * 0.5) flip("prev"); else flip("next"); return; }
   if (x < w * 0.38) flip("prev");
   else if (x > w * 0.62) flip("next");
 }
