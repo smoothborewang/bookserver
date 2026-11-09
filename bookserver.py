@@ -297,6 +297,11 @@ def move_book(rel, target):
             n += 1
     os.rename(src, dst)
     new_rel = os.path.relpath(dst, BASE).replace(os.sep, "/")
+    if DB_READER_ENABLED:             # 库里的记录跟着书走，否则会留下旧路径孤儿行 + 新路径重复解析
+        try:
+            bookdb.move_book(rel, new_rel)
+        except Exception as e:
+            print("move_book db sync failed: %s" % e)
     with _plock:                      # 阅读进度跟着书走
         old = _progress.pop(rel, None)
         if old is not None:

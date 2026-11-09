@@ -448,6 +448,37 @@ def chapter_count(rel):
     return (row[0], row[1]) if row else (0, None)
 
 
+def move_book(old_rel, new_rel):
+    """书在书库里被移动/改名后同步数据库记录。
+
+    不处理会导致：旧路径留下一条孤儿行（封面/阅读 404），新路径又被当成新书重新解析，
+    同一本书在列表里出现两张卡片。这里把记录原地改名；若目标路径已存在记录，
+    保留章节更完整的一条，删掉另一条（章节随 books 行级联删除）。
+    """
+    if old_rel == new_rel:
+        return
+    with _lock:
+        conn = get_conn()
+        old = conn.execute("SELECT id, chapter_count FROM books WHERE rel=?",
+                           (old_rel,)).fetchone()
+        new = conn.execute("SELECT id, chapter_count FROM books WHERE rel=?",
+                           (new_rel,)).fetchone()
+        if old is None:
+            conn.execute("UPDATE parse_jobs SET rel=? WHERE rel=?", (new_rel, old_rel))
+            conn.commit()
+            return
+        if new is not None:
+            if (old["chapter_count"] or 0) > (new["chapter_count"] or 0):
+                conn.execute("DELETE FROM books WHERE id=?", (new["id"],))
+                conn.execute("UPDATE books SET rel=? WHERE id=?", (new_rel, old["id"]))
+            else:
+                conn.execute("DELETE FROM books WHERE id=?", (old["id"],))
+        else:
+            conn.execute("UPDATE books SET rel=? WHERE id=?", (new_rel, old["id"]))
+        conn.execute("UPDATE parse_jobs SET rel=? WHERE rel=?", (new_rel, old_rel))
+        conn.commit()
+
+
 def delete_book(rel):
     """删除书及其章节（级联）。"""
     with _lock:
