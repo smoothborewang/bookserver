@@ -155,3 +155,38 @@ sudo dd if=pi_backup.img of=/dev/sdX bs=4M status=progress conv=fsync
 - 访问码、下载器 RPC 密钥、共享账号口令都通过环境变量注入，不写进代码、不提交到仓库。
 - `data/books.db` 里含抽出的章节正文，按书籍版权同等对待，不要公开、不要上传网盘。
 - 仓库里生成的备份、日志、进度文件都已被 `.gitignore` 排除，提交前用 `git status` 复核一遍。
+
+## 第三批：让路前台 + 分页缓存 + 正文压缩（2026-11）
+
+### 1. 后台任务降优先级
+
+后台有两处常驻线程：分章解析 `_worker_loop()`、书库目录监听 `_watch_loop()`（每 20s 扫一次目录）。两者入口都调用 `_lower_priority()`：
+
+- `os.nice(19)`（Linux 下 nice 按线程生效，不影响主线程的响应）；
+- `ionice -t -c3 -p <native_id>`（idle IO 类，失败静默）。
+
+验收：`ps -L -o tid,ni,comm -p $(pgrep -f bookserver.py | head -1)`，主线程 NI=0，两个后台线程 NI=19。效果是解析新书时前台翻页不再被单核抢占。
+
+### 2. 阅读页分页结果缓存
+
+`paginate()` 是真实测量式分页（逐段塞满视口、溢出再用 Range 二分切字符），每次改字号/换字体/改窗口尺寸/换章都要整章重排。现在把结果缓存在前端内存：
+
+- 键 `REL|章序|viewportWidth|viewportHeight|字号|字体族`，最多 6 条，FIFO 淘汰；
+- 值是 `pages.innerHTML` ＋ `paraPage`（段落→页号映射），命中时重建页元素并恢复位置，失败自动回退整章重排；
+- 只存在浏览器内存，刷新即失效，不写 IndexedDB（避免旧版式串页）。
+
+三套模板（TXT / DB_READER / EPUB 视图）中前两套带 `paginate`，均已接入。
+
+### 3. books.db 正文压缩与去冗余
+
+量化结果（迁移前 695.4MB）：`chapters` 37,183 行，`content_html` 合计 145.6M 字符、`plain_text` 合计 131.6M 字符，而 `plain_text` 全库**只有写入、没有任何读取**，属纯冗余。
+
+改动：
+
+- `content_html` 入库前 `zlib.compress(..., 6)` 存 BLOB（`_pack_html`），读取时 `_unpack_html` 解压，BLOB/TEXT 双向兼容，支持新旧混存；
+- `save_chapters()` 不再写 `plain_text`（表定义里保留列，新库可后续 DDL 清理）；
+- `tools/migrate_chapters.py` 做存量迁移：`copy` 段逐批（200 行）复制到 `chapters_new`（可断点续跑），`swap` 段在停服务后换表、重建索引、`VACUUM`、`integrity_check`。
+
+实测：695MB → **201MB**（正文压缩后 170.9MB，`PRAGMA integrity_check` = ok，37,183 行全部为 blob 且抽样解压无误）。迁移耗时约 12 分钟（copy 段可在线跑，swap+VACUUM 需停服务约 6 分钟）。
+
+注意：迁移脚本务必用 `nohup` 后台跑并把日志落盘；SSH 通道 `exec_command` 超时会中断读取（远端进程仍可能继续），事后要以数据库文件和 `systemctl is-active` 的实际状态为准，不要凭命令返回判断。

@@ -1512,7 +1512,23 @@ def build_chapters(rel):
     return True
 
 
+def _lower_priority():
+    """把当前线程降到最低调度优先级：后台解析/扫描不能跟前台请求抢这颗单核。"""
+    try:
+        os.nice(19)                    # Linux 上 nice 是按线程生效的，不影响主线程
+    except (OSError, AttributeError):
+        pass
+    try:
+        import subprocess
+        tid = threading.get_native_id()
+        subprocess.call(["/usr/bin/ionice", "-t", "-c3", "-p", str(tid)],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 def _worker_loop():
+    _lower_priority()
     while True:
         claimed = bookdb.claim_job()
         if claimed is None:
@@ -1617,6 +1633,7 @@ def _known_rels():
 
 
 def _watch_loop():
+    _lower_priority()
     known = _known_rels()
     while True:
         time.sleep(20)
@@ -2858,11 +2875,40 @@ function _splitToFit(el,pg){
   return [a, b];
 }
 
+/* ---------- 分页结果缓存：同一章在同样字号/字体/宽度下不必重算 ---------- */
+var _pgCache = {}, _pgKeys = [], _PGC_MAX = 6;
+function pgKey(){
+  return REL + "|" + curChap + "|" + pages.clientWidth + "|" +
+         pages.clientHeight + "|" + curFont + "|" + curFontFam;
+}
+function pgRestore(c, ratio){
+  pages.innerHTML = c.h;
+  PGEL = [].slice.call(pages.querySelectorAll(".page"));
+  if (!PGEL.length) return false;
+  paraPage = c.p.slice();
+  for (var i=0;i<PGEL.length;i++){ PGEL[i].style.visibility = ""; PGEL[i].classList.remove("on"); }
+  total = PGEL.length; cur = -1;
+  showPage(Math.round(ratio * (total - 1)));
+  return true;
+}
+function pgSave(k){
+  try{
+    _pgCache[k] = { h: pages.innerHTML, p: paraPage.slice() };
+    _pgKeys.push(k);
+    while (_pgKeys.length > _PGC_MAX){ delete _pgCache[_pgKeys.shift()]; }
+  }catch(e){}
+}
+
 function paginate(keep){
   var ratio = keep ? pageRatio() : 0;
   if (pages.clientHeight < 80 && document.body.clientHeight > 80){
     requestAnimationFrame(function(){ paginate(keep); });
     return;
+  }
+  var pk = pgKey();
+  if (_pgCache[pk]){
+    try { if (pgRestore(_pgCache[pk], ratio)) return; }
+    catch(e){ delete _pgCache[pk]; }
   }
   while (pages.firstChild) pages.removeChild(pages.firstChild);
   src.textContent = "";
@@ -2905,6 +2951,7 @@ function paginate(keep){
   }
   for (var q=0;q<PGEL.length;q++){ PGEL[q].style.visibility = ""; PGEL[q].classList.remove("on"); }
   total = PGEL.length;
+  pgSave(pk);
   showPage(Math.round(ratio * (total - 1)));
 }
 
@@ -3448,11 +3495,39 @@ function _splitToFit(el,pg){
   if((b.className||"").indexOf("cont")<0) b.className=(b.className?b.className+" ":"")+"cont";
   return [a,b];
 }
+/* ---------- 分页结果缓存：同一章在同样字号/字体/宽度下不必重算 ---------- */
+var _pgCache={}, _pgKeys=[], _PGC_MAX=6;
+function pgKey(){
+  return REL+"|"+curChap+"|"+pages.clientWidth+"|"+pages.clientHeight+
+         "|"+curFont+"|"+curFontFam;
+}
+function pgRestore(c,ratio){
+  pages.innerHTML=c.h;
+  PGEL=[].slice.call(pages.querySelectorAll(".page"));
+  if(!PGEL.length) return false;
+  paraPage=c.p.slice();
+  for(var i=0;i<PGEL.length;i++){ PGEL[i].style.visibility=""; PGEL[i].classList.remove("on"); }
+  total=PGEL.length; cur=-1;
+  showPage(Math.round(ratio*(total-1)));
+  return true;
+}
+function pgSave(k){
+  try{
+    _pgCache[k]={h:pages.innerHTML,p:paraPage.slice()};
+    _pgKeys.push(k);
+    while(_pgKeys.length>_PGC_MAX){ delete _pgCache[_pgKeys.shift()]; }
+  }catch(e){}
+}
+
 function paginate(keep){
   var ratio=keep?inRatio():0;
   if(pages.clientHeight<80&&document.body.clientHeight>80){
     requestAnimationFrame(function(){ paginate(keep); });
     return;
+  }
+  var pk=pgKey();
+  if(_pgCache[pk]){
+    try{ if(pgRestore(_pgCache[pk],ratio)) return; }catch(e){ delete _pgCache[pk]; }
   }
   while(pages.firstChild) pages.removeChild(pages.firstChild);
   src.textContent="";
@@ -3492,6 +3567,7 @@ function paginate(keep){
   }
   for(var q=0;q<PGEL.length;q++){ PGEL[q].style.visibility=""; PGEL[q].classList.remove("on"); }
   total=PGEL.length;
+  pgSave(pk);
   showPage(Math.round(ratio*(total-1)));
 }
 function showPage(n){

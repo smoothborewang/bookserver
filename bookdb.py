@@ -16,6 +16,7 @@ import re
 import sqlite3
 import threading
 import time
+import zlib
 from html import escape as html_escape
 
 # ----------------------------------------------------------------------------
@@ -373,8 +374,8 @@ def save_chapters(rel, ext, chapters, content_hash=None, meta=None):
             total_chars += ch["char_count"]
             conn.execute(
                 "INSERT INTO chapters(book_id, ordinal, title, content_html,"
-                " plain_text, char_count, source) VALUES(?,?,?,?,?,?,?)",
-                (book_id, ordinal, ch["title"], ch["html"], ch["plain_text"],
+                " char_count, source) VALUES(?,?,?,?,?,?)",
+                (book_id, ordinal, ch["title"], _pack_html(ch["html"]),
                  ch["char_count"], ch["source"]),
             )
         conn.execute(
@@ -391,6 +392,24 @@ def save_chapters(rel, ext, chapters, content_hash=None, meta=None):
             conn.execute("UPDATE books SET %s WHERE id=?" % ",".join(sets), vals)
         conn.commit()
         return len(chapters)
+
+
+def _pack_html(html):
+    """正文入库前 zlib 压缩：单章多为 10~20KB 中文，压缩后通常只剩 40%~50%。"""
+    try:
+        return zlib.compress(html.encode("utf-8"), 6)
+    except Exception:
+        return html
+
+
+def _unpack_html(v):
+    """读取兼容：新数据是压缩后的 BLOB，老数据是纯 TEXT，直接返回。"""
+    if isinstance(v, (bytes, bytearray)):
+        try:
+            return zlib.decompress(bytes(v)).decode("utf-8", "replace")
+        except Exception:
+            return ""
+    return v or ""
 
 
 def get_toc(rel):
@@ -414,7 +433,11 @@ def get_chapter(rel, ordinal):
         "SELECT ordinal, title, content_html, char_count FROM chapters"
         " WHERE book_id=? AND ordinal=?", (row[0], ordinal)
     ).fetchone()
-    return dict(r) if r else None
+    if not r:
+        return None
+    d = dict(r)
+    d["content_html"] = _unpack_html(d["content_html"])
+    return d
 
 
 def chapter_count(rel):
