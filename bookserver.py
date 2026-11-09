@@ -2804,7 +2804,8 @@ function applyFontFam(k, repag){
   try { localStorage.setItem("bookFontFam", k); } catch(e) {}
   var bs = document.querySelectorAll(".ffbtn");
   for (var i=0;i<bs.length;i++) bs[i].classList.toggle("on", bs[i].getAttribute("data-f") === k);
-  if (repag) setTimeout(function(){ paginate(true); }, 0);
+  /* 切到霞鹜文楷要等字体真正到达再重排，否则用的是回退字体的度量 */
+  if (repag) (k === "lxgw" ? warmFonts() : Promise.resolve()).then(function(){ paginate(true); });
 }
 
 var pages = document.getElementById("pages");
@@ -3163,6 +3164,8 @@ applyFont(curFont, false);
 function warmFonts(){
   try{
     if(!document.fonts||!document.fonts.load) return Promise.resolve();
+    /* 只有当前确实选了霞鹜文楷才去拉那 1.6MB 字体，选系统字体时不下载 */
+    if(curFontFam!=="lxgw") return Promise.resolve();
     var p=document.fonts.load("16px 'LXGW WenKai'").then(function(){ return document.fonts.ready; },
       function(){ return document.fonts.ready; });
     return Promise.race([p,new Promise(function(res){ setTimeout(res,2500); })]);
@@ -3396,7 +3399,10 @@ function applyFontFam(k, repag){
   try{ localStorage.setItem("bookFontFam",k); }catch(e){}
   var bs=document.querySelectorAll(".ffbtn");
   for(var i=0;i<bs.length;i++) bs[i].classList.toggle("on",bs[i].getAttribute("data-f")===k);
-  if(repag&&P.length) setTimeout(function(){ paginate(true); },0);
+  if(repag&&P.length){
+    /* 切到霞鹜文楷要等字体到齐再重排，否则按回退字体的度量算出来是错的 */
+    (k==="lxgw"?warmFonts():Promise.resolve()).then(function(){ paginate(true); });
+  }
 }
 
 /* ---------- 章内分页（真实测量：填满可视高度，段落放不下则按字符续排） ---------- */
@@ -3553,6 +3559,7 @@ function prefetch(i){ if(i>=0&&i<totalChapters&&!chapCache[i]) fetchChapter(i).c
 function warmFonts(){
   try{
     if(!document.fonts||!document.fonts.load) return Promise.resolve();
+    if(curFontFam!=="lxgw") return Promise.resolve();   /* 选系统字体就不拉这 1.6MB */
     var p=document.fonts.load("16px 'LXGW WenKai'").then(function(){ return document.fonts.ready; },
       function(){ return document.fonts.ready; });
     return Promise.race([p,new Promise(function(res){ setTimeout(res,2500); })]);
@@ -4558,6 +4565,21 @@ class Handler(BaseHTTPRequestHandler):
         }
         for k, v in (extra or {}).items():
             headers[k] = v
+        # 文本响应带 ETag：同一页重复打开走 304，省掉渲染后的压缩与整段传输
+        if code == 200 and len(body) >= self._GZIP_MIN:
+            etag = '"%s"' % hashlib.md5(body).hexdigest()
+            headers["ETag"] = etag
+            if not any(h.lower() == "cache-control" for h in headers):
+                headers["Cache-Control"] = "private, no-cache"
+            inm = self.headers.get("If-None-Match") or ""
+            if etag in inm:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                if "Cache-Control" in headers:
+                    self.send_header("Cache-Control", headers["Cache-Control"])
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
         # 文本类响应在客户端支持且体积足够时启用 gzip，弱网下显著省流量
         ae = self.headers.get("Accept-Encoding", "")
         is_text = any(tok in ctype for tok in self._GZIP_CTYPES)
