@@ -3029,6 +3029,37 @@ document.getElementById("jumpVal").addEventListener("keydown", function(e){
 });
 applyFlipMode(FLIP_MODE);
 
+/* ---------- 鼠标滚轮翻页 ---------- */
+var _wAcc = 0, _wT = 0;
+function wheelDir(dy){
+  if (!dy) return 0;
+  _wAcc += dy;
+  var now = Date.now();
+  if (now - _wT < 300 || Math.abs(_wAcc) < 30) return 0;   /* 节流，触控板的连续小增量合并成一次 */
+  _wT = now;
+  var d = _wAcc > 0 ? 1 : -1;
+  _wAcc = 0;
+  return d;
+}
+function wheelEv(e){
+  if (e.ctrlKey) return;                                    /* 触控板双指缩放不拦 */
+  var d = wheelDir(e.deltaY);
+  if (!d) return;
+  var el = PGEL[cur];
+  /* 当前页比屏幕高时，先让正文自己滚完再翻页 */
+  if (el && el.scrollHeight - el.clientHeight > 8){
+    var atTop = el.scrollTop <= 0, atBot = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+    if (d > 0 && !atBot) return;
+    if (d < 0 && !atTop) return;
+  }
+  e.preventDefault();
+  if (d > 0) nextPage(); else prevPage();
+}
+(function(){
+  var pc = document.getElementById("pages");
+  if (pc) pc.addEventListener("wheel", wheelEv, {passive:false});
+})();
+
 /* ---------- 目录（章节识别结果，借鉴开源阅读） ---------- */
 var tocWrap = document.getElementById("tocWrap");
 var tocList = document.getElementById("tocList");
@@ -3669,6 +3700,34 @@ document.getElementById("jumpVal").addEventListener("keydown",function(e){
   if(e.key==="Enter"){ e.preventDefault(); doJump(); }
 });
 applyFlipMode(FLIP_MODE);
+
+/* ---------- 鼠标滚轮翻页 ---------- */
+var _wAcc=0,_wT=0;
+function wheelDir(dy){
+  if(!dy) return 0;
+  _wAcc+=dy;
+  var now=Date.now();
+  if(now-_wT<300||Math.abs(_wAcc)<30) return 0;
+  _wT=now;
+  var d=_wAcc>0?1:-1;
+  _wAcc=0;
+  return d;
+}
+function wheelEv(e){
+  if(e.ctrlKey) return;
+  var d=wheelDir(e.deltaY);
+  if(!d) return;
+  var el=PGEL[cur];
+  if(el&&el.scrollHeight-el.clientHeight>8){
+    var atTop=el.scrollTop<=0, atBot=el.scrollTop+el.clientHeight>=el.scrollHeight-2;
+    if(d>0&&!atBot) return;
+    if(d<0&&!atTop) return;
+  }
+  e.preventDefault();
+  if(d>0) nextPage(); else prevPage();
+}
+if(typeof pages!=="undefined"&&pages) pages.addEventListener("wheel",wheelEv,{passive:false});
+
 if(document.fonts){
   var _fontReT=0;
   document.fonts.addEventListener("loadingdone",function(){
@@ -4181,6 +4240,30 @@ document.getElementById("jumpVal").addEventListener("keydown", function(e){
 });
 applyFlipMode(FLIP_MODE);
 
+/* ---------- 鼠标滚轮翻页（外层 + EPUB 内页各绑一次） ---------- */
+var _wAcc = 0, _wT = 0;
+function wheelDir(dy){
+  if (!dy) return 0;
+  _wAcc += dy;
+  var now = Date.now();
+  if (now - _wT < 300 || Math.abs(_wAcc) < 30) return 0;
+  _wT = now;
+  var d = _wAcc > 0 ? 1 : -1;
+  _wAcc = 0;
+  return d;
+}
+(function(){
+  var v = document.getElementById("viewer");
+  if (!v) return;
+  v.addEventListener("wheel", function(e){
+    if (e.ctrlKey) return;
+    var d = wheelDir(e.deltaY);
+    if (!d) return;
+    e.preventDefault();
+    flip(d > 0 ? "next" : "prev");
+  }, {passive:false});
+})();
+
 /* ---------- 阅读进度 ---------- */
 /* REL 已在脚本开头按 location.pathname 算出 */
 var LAST_LOC = null, TM = null, SEC = 0, opened = false, BASE_T = 0, SEEN_T = 0;
@@ -4385,6 +4468,14 @@ rendition.hooks.content.register(function(contents){
     var vw = document.getElementById("viewer").clientWidth || 1;
     tapZone(e.clientX + L - 0, vw);
   }, false);
+  /* EPUB 正文在 iframe 里，滚轮事件要先落到内容层才拿得到 */
+  doc.addEventListener("wheel", function(e){
+    if (e.ctrlKey) return;
+    var d = wheelDir(e.deltaY);
+    if (!d) return;
+    e.preventDefault();
+    flip(d > 0 ? "next" : "prev");
+  }, {passive:false});
 });
 /* 点在 iframe 之外（边缘留白）也按左右分区翻页 */
 (function(){
