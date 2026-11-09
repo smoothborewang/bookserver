@@ -1,0 +1,21 @@
+[Unit]
+Description=BookShelf lightweight ebook server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/bookserver
+Environment=BOOK_BASE=/home/pi/books/library
+Environment=BOOK_STATIC=/home/pi/bookserver/static
+Environment=BOOK_PORT=8080
+EnvironmentFile=-/etc/default/bookserver
+ExecStart=/usr/bin/python3 /home/pi/bookserver/bookserver.py
+Restart=always
+RestartSec=5
+MemoryMax=180M
+
+[Install]
+WantedBy=multi-user.target

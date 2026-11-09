@@ -1,0 +1,23 @@
+# --- 数据与书库：绝不上传 ---
+data/
+*.db
+*.db-shm
+*.db-wal
+books/
+library/
+progress.json
+
+# --- 个人与部署相关 ---
+*.bak.*
+*.bak
+.env
+.env.*
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- 系统杂物 ---
+.DS_Store
+Thumbs.db
