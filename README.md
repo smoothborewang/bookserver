@@ -21,7 +21,15 @@ bookdb.py          SQLite 索引层（建库、分类、检索、进度）
 kf8.py             Kindle KF8/AZW3 正文与目录解析
 static/            epub.js、jszip、图标、字体子集
 deploy/            systemd 单元文件
+docs/              使用说明与运维手册
 ```
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [docs/USAGE.md](docs/USAGE.md) | 能读哪些格式、页面怎么用、书库目录约定、进度同步、OPDS/Legado 接入、已知限制 |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | 首次部署、升级流程、状态文件、故障排查表、备份恢复、新增服务约束、安全建议 |
 
 ## 快速开始
 
