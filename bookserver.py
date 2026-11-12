@@ -23,6 +23,7 @@
 import bisect
 import base64
 import gzip
+import io
 import hashlib
 import hmac
 import json
@@ -224,6 +225,55 @@ def scan_books(force=False):
     return books
 
 
+_DB_BOOKS_CACHE = {"t": 0.0, "books": []}
+
+
+def books_from_db(limit=None, offset=0):
+    """从 books 表构建书单，避免每次 /api/books 都 os.walk + 逐文件 stat。
+    返回结构与 scan_books 一致；表为空或异常时返回 []，调用方回退扫盘。"""
+    import sqlite3
+    if limit is None and time.time() - _DB_BOOKS_CACHE["t"] < 30:
+        return _DB_BOOKS_CACHE["books"]
+    out = []
+    try:
+        conn = sqlite3.connect(bookdb.DB_PATH, timeout=30)
+        sql = "SELECT rel, title, ext, size, mtime_ns FROM books"
+        if limit:
+            sql += " LIMIT %d OFFSET %d" % (int(limit), int(offset))
+        rows = conn.execute(sql).fetchall()
+        conn.close()
+    except Exception:
+        return []
+    for rel, title, ext, size, mtime_ns in rows:
+        if not rel:
+            continue
+        d = rel.rsplit("/", 1)[0] if "/" in rel else ""
+        base = rel.rsplit("/", 1)[-1]
+        ext2 = (ext or os.path.splitext(base)[1].lstrip(".")).lower()
+        if ("." + ext2) not in EXTS:
+            continue
+        pr = _progress.get(rel) or {}
+        try:
+            pct = float(pr.get("pct") or 0)
+        except (TypeError, ValueError):
+            pct = 0.0
+        out.append({
+            "rel": rel,
+            "dir": d,
+            "name": title or os.path.splitext(base)[0],
+            "ext": ext2,
+            "size": int(size or 0),
+            "mtime": int((mtime_ns or 0) // 1000000000),
+            "pct": max(0, min(100, int(round(pct)))),
+            "readAt": int(pr.get("t") or 0),
+            "readN": int(pr.get("n") or 0),
+            "readSec": int(pr.get("tot") or 0),
+        })
+    if limit is None and out:
+        _DB_BOOKS_CACHE.update(t=time.time(), books=out)
+    return out
+
+
 _BOOKS_JSON_CACHE = {}
 
 
@@ -379,6 +429,53 @@ def epub_cover_bytes(path):
             return (full, z.read(full))
     except (OSError, zipfile.BadZipFile, KeyError, ValueError):
         return None
+
+
+THUMB_DIR = os.path.join(BOOKS_ROOT, ".thumbs")
+THUMB_W = 320
+THUMB_Q = 72
+
+
+def _thumb_target(rel):
+    return os.path.join(THUMB_DIR, hashlib.sha1(rel.encode("utf-8")).hexdigest()[:16] + ".jpg")
+
+
+def thumb_for(rel):
+    """网格视图用缩略图：优先读缓存，未命中用原封面现做一张。失败返回 None。"""
+    tgt = _thumb_target(rel)
+    try:
+        if os.path.exists(tgt):
+            with open(tgt, "rb") as fh:
+                return fh.read()
+    except OSError:
+        pass
+    got = cover_for(rel)
+    if not got:
+        return None
+    data = got[0]
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(data))
+        im.load()
+        w, h = im.size
+        if w > THUMB_W:
+            nh = max(1, int(h * THUMB_W / float(w)))
+            im = im.resize((THUMB_W, nh), Image.LANCZOS)
+        im = im.convert("RGB")
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=THUMB_Q, optimize=True, progressive=True)
+        small = out.getvalue()
+    except Exception:
+        return None
+    try:
+        os.makedirs(THUMB_DIR, exist_ok=True)
+        tmp = tgt + ".tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(small)
+        os.replace(tmp, tgt)
+    except OSError:
+        pass
+    return small
 
 
 def cover_for(rel):
@@ -1574,6 +1671,9 @@ def enqueue_existing(books):
     for b in books:
         rel, ext = b["rel"], b["ext"]
         if ext in _SKIP_EXTS:
+            bookdb.upsert_book(rel, ext, "skipped",
+                               size=b.get("size") or 0,
+                               mtime_ns=int(b.get("mtime") or 0) * 1000000000)
             continue
         stt = bookdb.get_status(rel)
         if stt is None or stt["parse_status"] != "parsed":
@@ -1646,11 +1746,26 @@ def _watch_loop():
             cur = _known_rels()
             if cur != known:
                 added = cur - known
+                gone = known - cur
                 known = cur
                 books = scan_books(force=True)
                 for b in books:
-                    if b["rel"] in added and b["ext"] not in _SKIP_EXTS:
+                    if b["rel"] not in added:
+                        continue
+                    if b["ext"] in _SKIP_EXTS:
+                        # PDF 等不入解析队列，但必须进 books 表，否则列表走库会漏书
+                        bookdb.upsert_book(b["rel"], b["ext"], "skipped",
+                                           size=b.get("size") or 0,
+                                           mtime_ns=int(b.get("mtime") or 0) * 1000000000)
+                    else:
                         bookdb.enqueue(b["rel"], 100)
+                # 文件被移走/删除时同步清理；cur 为空（盘掉线、目录不可读）时不清理
+                if cur:
+                    for rel in gone:
+                        try:
+                            bookdb.delete_book(rel)
+                        except Exception:
+                            pass
         except Exception:
             time.sleep(10)
 
@@ -2031,6 +2146,8 @@ body[data-view="list"] .racts a,body[data-view="list"] .racts .btn{padding:6px 1
 var ALL = [];
 var DIRS = [];
 var CAT = "__all";
+var PAGE = 60;
+var SHOWN = PAGE;
 var CUR = null;
 var VIEW = "list";
 try { VIEW = localStorage.getItem("bookView") || "list"; } catch(e){}
@@ -2056,6 +2173,11 @@ function when(ts){
   return (dt.getMonth()+1)+'月'+dt.getDate()+'日';
 }
 function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function moreHtml(total){
+  if (total <= SHOWN) return '';
+  return '<div style="grid-column:1/-1;display:flex;justify-content:center;padding:12px 0">'+
+    '<button class="btn" type="button" data-more="1">加载更多（还有 '+(total-SHOWN)+' 本）</button></div>';
+}
 function render(){
   var q = document.getElementById('q').value.trim().toLowerCase();
   var list = ALL.filter(function(b){
@@ -2066,14 +2188,18 @@ function render(){
     }
     return !q || (b.name+' '+b.rel).toLowerCase().indexOf(q)>=0;
   });
-  document.getElementById('cnt').textContent = list.length + ' / ' + ALL.length + ' 本';
+  if (SHOWN > list.length) SHOWN = list.length;
+  if (SHOWN < PAGE && list.length > PAGE) SHOWN = PAGE;
+  var visible = list.slice(0, SHOWN);
+  document.getElementById('cnt').textContent =
+    (list.length > SHOWN ? ('显示 ' + SHOWN + ' / ') : '') + list.length + ' / ' + ALL.length + ' 本';
   var el = document.getElementById('list');
   if(!list.length){
     el.innerHTML = '<div class="empty">'+(ALL.length?'没有匹配的书':'书库还是空的，点右上角「上传书籍」加几本')+'</div>';
     return;
   }
   if (VIEW === "list"){
-    el.innerHTML = list.map(function(b){
+    el.innerHTML = visible.map(function(b){
       var canRead = b.ext==='epub'||b.ext==='pdf'||b.ext==='txt'||b.ext==='mobi'||b.ext==='azw3';
       var enc = encodeURI(b.rel);
       var link = canRead ? '/read/'+enc : '/file/'+enc;
@@ -2085,16 +2211,16 @@ function render(){
         '<a class="btn" href="/file/'+enc+'" download>下载</a>'+
         '<button class="btn" type="button" data-move="'+esc(b.rel)+'">分类</button>'+
         '<button class="btn del" type="button" data-rel="'+esc(b.rel)+'">删除</button></div></div>';
-    }).join('');
+    }).join('') + moreHtml(list.length);
     return;
   }
-  el.innerHTML = list.map(function(b){
-    var canRead = b.ext==='epub'||b.ext==='pdf'||b.ext==='txt'||b.ext==='mobi';
+  el.innerHTML = visible.map(function(b){
+    var canRead = b.ext==='epub'||b.ext==='pdf'||b.ext==='txt'||b.ext==='mobi'||b.ext==='azw3';
     var enc = encodeURI(b.rel);
     var link = canRead ? '/read/'+enc : '/file/'+enc;
     return '<div class="card">'+
       '<a class="cover" href="'+link+'"><span class="ph">'+esc(String(b.name||'?').slice(0,1))+'</span>'+
-        '<img loading="lazy" decoding="async" src="/cover/'+enc+'" alt="" onerror="this.remove()">'+
+        '<img loading="lazy" decoding="async" src="/thumb/'+enc+'" alt="" onerror="this.remove()">'+
         '<span class="ext">'+b.ext+'</span></a>'+
       '<div class="title">'+esc(b.name)+'</div>'+
       '<div class="meta"><span>'+hs(b.size)+'</span>'+
@@ -2105,7 +2231,7 @@ function render(){
       '<a class="btn" href="/file/'+enc+'" download>下载</a>'+
       '<button class="btn" type="button" data-move="'+esc(b.rel)+'">分类</button>'+
       '<button class="btn del" type="button" data-rel="'+esc(b.rel)+'">删除</button></div></div>';
-  }).join('');
+  }).join('') + moreHtml(list.length);
 }
 /* ---------- 分类 ---------- */
 function postJSON(url, data){
@@ -2134,7 +2260,7 @@ document.getElementById('cats').addEventListener('click', function(e){
     if(t.getAttribute){
       if(t.getAttribute('data-new')){ newCat(); return; }
       var c = t.getAttribute('data-cat');
-      if(c){ CAT = c; buildCats(); render(); return; }
+      if(c){ CAT = c; SHOWN = PAGE; buildCats(); render(); return; }
     }
     t = t.parentNode;
   }
@@ -2200,7 +2326,7 @@ document.getElementById('mvnewbtn').onclick = function(){
   });
 };
 
-document.getElementById('q').addEventListener('input', render);
+document.getElementById('q').addEventListener('input', function(){ SHOWN = PAGE; render(); });
 document.getElementById('viewBtn').onclick = function(){ setView(VIEW === 'list' ? 'grid' : 'list') };
 setView(VIEW);
 
@@ -2223,7 +2349,7 @@ function load(){
                   DIRS.some(function(x){ return x && x.dir === CAT; });
       if (!alive) CAT = "__all";
     }
-    buildCats(); render();
+    buildCats(); SHOWN = PAGE; render();
   }).catch(function(e){
     document.getElementById('list').innerHTML='<div class="empty">读取书库失败：'+esc(String(e))+'</div>';
   });
@@ -2255,6 +2381,7 @@ function del(btn){
 document.getElementById('list').addEventListener('click', function(e){
   var t = e.target;
   while(t && t !== this){
+    if(t.getAttribute && t.getAttribute('data-more')){ SHOWN += PAGE; render(); return; }
     if(t.classList && t.classList.contains('del')){ del(t); return; }
     if(t.getAttribute && t.getAttribute('data-move')){ openMove(t.getAttribute('data-move')); return; }
     t = t.parentNode;
@@ -4692,6 +4819,13 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, data, STATIC_MIME.get(ext, "image/jpeg"),
                           extra={"Cache-Control": "public, max-age=2592000"})
 
+    def serve_thumb(self, rel):
+        data = thumb_for(rel)
+        if not data:
+            return self._send(404, b"", "text/plain")
+        return self._send(200, data, "image/jpeg",
+                          extra={"Cache-Control": "public, max-age=2592000"})
+
     # ---------------- 认证 ----------------
 
     def is_authed(self):
@@ -4809,10 +4943,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/cover/"):
             return self.serve_cover(safe_rel(path[len("/cover/"):]))
+        if path.startswith("/thumb/"):
+            return self.serve_thumb(safe_rel(path[len("/thumb/"):]))
 
         if path == "/api/books":
-            data = scan_books()
-            return self._send(200, books_json(data),
+            qs = parse_qs(urlparse(self.path).query)
+            data = None
+            if not qs.get("scan"):
+                data = books_from_db()
+            if not data:
+                data = scan_books()
+                payload = books_json(data)
+            else:
+                payload = books_json(data)
+            return self._send(200, payload,
                               "application/json; charset=utf-8",
                               extra={"Cache-Control": "private, max-age=30"})
 
