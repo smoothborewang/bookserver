@@ -2865,7 +2865,7 @@ button:active{background:var(--btnact)}
   <div class="prow"><span class="plab">翻页</span>
     <select id="flipMode">
       <option value="std">标准（左右分区）</option>
-      <option value="one">单手（半屏点按）</option>
+      <option value="one">单手（上：上一页 · 下：下一页）</option>
       <option value="float">悬浮按钮</option>
     </select></div>
   <div class="prow"><span class="plab">跳转</span>
@@ -3169,8 +3169,9 @@ function applyFlipMode(m){
   var sel = document.getElementById("flipMode"); if (sel) sel.value = m;
   var fl = document.getElementById("floats");
   if (fl) fl.classList.toggle("hide", m !== "float");
+  if (m === "float" && window._floatFade) window._floatFade();
   var pgc = document.getElementById("pages");
-  if (pgc) pgc.style.paddingBottom = (m === "float") ? "66px" : "";
+  if (pgc) pgc.style.paddingBottom = (m === "float") ? "60px" : "";
   if (typeof paginate === "function" && typeof P !== "undefined" && P.length){
     setTimeout(function(){ paginate(true); }, 0);
   }
@@ -3178,10 +3179,19 @@ function applyFlipMode(m){
 (function(){
   var bar = document.createElement("div");
   bar.id = "floats"; bar.className = "hide";
-  bar.style.cssText = "position:fixed;left:0;right:0;bottom:10px;display:flex;gap:10px;padding:0 12px;z-index:70;pointer-events:none";
-  bar.innerHTML = '<button id="fPrev" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">上一页</button>'
-    + '<button id="fNext" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">下一页</button>';
+  bar.style.cssText = "position:fixed;right:10px;bottom:14px;display:flex;gap:8px;z-index:70;pointer-events:none;transition:opacity .25s";
+  bar.innerHTML = '<button id="fPrev" type="button" title="上一页" aria-label="上一页" style="pointer-events:auto;width:46px;height:46px;border-radius:50%;font-size:14px;line-height:1;opacity:.95;box-shadow:0 1px 4px rgba(0,0,0,.22)">上页</button>'
+    + '<button id="fNext" type="button" title="下一页" aria-label="下一页" style="pointer-events:auto;width:46px;height:46px;border-radius:50%;font-size:14px;line-height:1;opacity:.95;box-shadow:0 1px 4px rgba(0,0,0,.22)">下页</button>';
   document.body.appendChild(bar);
+  var _fT = null;
+  window._floatFade = function(){
+    bar.style.opacity = "1";
+    clearTimeout(_fT);
+    _fT = setTimeout(function(){ if (FLIP_MODE === "float") bar.style.opacity = "0.35"; }, 3000);
+  };
+  document.addEventListener("touchstart", window._floatFade, {passive: true});
+  document.addEventListener("mousedown", window._floatFade);
+  bar.addEventListener("touchstart", window._floatFade, {passive: true});
   document.getElementById("fPrev").onclick = function(){ panel.classList.add("hide"); prevPage(); };
   document.getElementById("fNext").onclick = function(){ panel.classList.add("hide"); nextPage(); };
 })();
@@ -3287,8 +3297,14 @@ pages.addEventListener("touchend", function(e){
 }, {passive:true});
 pages.addEventListener("click", function(e){
   if (Date.now() - tMoved < 400) return;
+  /* 点正文先收起阅读设置面板，且不触发翻页 */
+  if (!panel.classList.contains("hide")){ panel.classList.add("hide"); return; }
   var w = pages.clientWidth;
-  if (FLIP_MODE === "one"){ if (e.clientX < w * 0.5) prevPage(); else nextPage(); return; }
+  if (FLIP_MODE === "one"){
+    var r0 = pages.getBoundingClientRect(), h0 = pages.clientHeight || 1;
+    if (e.clientY - r0.top < h0 * 0.5) prevPage(); else nextPage();
+    return;
+  }
   if (e.clientX < w * 0.38) prevPage();
   else if (e.clientX > w * 0.62) nextPage();
 });
@@ -3495,7 +3511,7 @@ button:active{background:var(--btnact)}
   <div class="prow"><span class="plab">翻页</span>
     <select id="flipMode">
       <option value="std">标准（左右分区）</option>
-      <option value="one">单手（半屏点按）</option>
+      <option value="one">单手（上：上一页 · 下：下一页）</option>
       <option value="float">悬浮按钮</option>
     </select></div>
   <div class="prow"><span class="plab">跳转</span>
@@ -3871,8 +3887,9 @@ function applyFlipMode(m){
   try{ localStorage.setItem("bookFlipMode",m); }catch(e){}
   var sel=document.getElementById("flipMode"); if(sel) sel.value=m;
   var fl=document.getElementById("floats"); if(fl) fl.classList.toggle("hide",m!=="float");
+  if(m==="float"&&window._floatFade)window._floatFade();
   var pgc=document.getElementById("pages");
-  if(pgc) pgc.style.paddingBottom=(m==="float")?"66px":"";
+  if(pgc) pgc.style.paddingBottom=(m==="float")?"60px":"";
   if(typeof paginate==="function"&&typeof P!=="undefined"&&P.length){
     setTimeout(function(){ paginate(true); },0);
   }
@@ -3880,10 +3897,19 @@ function applyFlipMode(m){
 (function(){
   var bar=document.createElement("div");
   bar.id="floats"; bar.className="hide";
-  bar.style.cssText="position:fixed;left:0;right:0;bottom:10px;display:flex;gap:10px;padding:0 12px;z-index:70;pointer-events:none";
-  bar.innerHTML='<button id="fPrev" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">上一页</button>'
-    +'<button id="fNext" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">下一页</button>';
+  bar.style.cssText="position:fixed;right:10px;bottom:14px;display:flex;gap:8px;z-index:70;pointer-events:none;transition:opacity .25s";
+  bar.innerHTML='<button id="fPrev" type="button" title="上一页" aria-label="上一页" style="pointer-events:auto;width:46px;height:46px;border-radius:50%;font-size:14px;line-height:1;opacity:.95;box-shadow:0 1px 4px rgba(0,0,0,.22)">上页</button>'
+    +'<button id="fNext" type="button" title="下一页" aria-label="下一页" style="pointer-events:auto;width:46px;height:46px;border-radius:50%;font-size:14px;line-height:1;opacity:.95;box-shadow:0 1px 4px rgba(0,0,0,.22)">下页</button>';
   document.body.appendChild(bar);
+  var _fT = null;
+  window._floatFade = function(){
+    bar.style.opacity = "1";
+    clearTimeout(_fT);
+    _fT = setTimeout(function(){ if (FLIP_MODE === "float") bar.style.opacity = "0.35"; }, 3000);
+  };
+  document.addEventListener("touchstart", window._floatFade, {passive: true});
+  document.addEventListener("mousedown", window._floatFade);
+  bar.addEventListener("touchstart", window._floatFade, {passive: true});
   document.getElementById("fPrev").onclick=function(){ panel.classList.add("hide"); prevPage(); };
   document.getElementById("fNext").onclick=function(){ panel.classList.add("hide"); nextPage(); };
 })();
@@ -3959,8 +3985,13 @@ pages.addEventListener("touchend",function(e){
 },{passive:true});
 pages.addEventListener("click",function(e){
   if(Date.now()-tMoved<400)return;
+  if (!panel.classList.contains("hide")){ panel.classList.add("hide"); return; }
   var w=pages.clientWidth;
-  if(FLIP_MODE==="one"){ if(e.clientX<w*0.5)prevPage(); else nextPage(); return; }
+  if(FLIP_MODE==="one"){
+    var r0=pages.getBoundingClientRect(),h0=pages.clientHeight||1;
+    if(e.clientY-r0.top<h0*0.5)prevPage(); else nextPage();
+    return;
+  }
   if(e.clientX<w*0.38)prevPage(); else if(e.clientX>w*0.62)nextPage();
 });
 document.addEventListener("keydown",function(e){
@@ -4138,7 +4169,7 @@ button:active{background:var(--btnact)}
   <div class="prow"><span class="plab">翻页</span>
     <select id="flipMode">
       <option value="std">标准（左右分区）</option>
-      <option value="one">单手（半屏点按）</option>
+      <option value="one">单手（上：上一页 · 下：下一页）</option>
       <option value="float">悬浮按钮</option>
     </select></div>
   <div class="prow"><span class="plab">跳转</span>
@@ -4411,8 +4442,9 @@ function applyFlipMode(m){
   var sel = document.getElementById("flipMode"); if (sel) sel.value = m;
   var fl = document.getElementById("floats");
   if (fl) fl.classList.toggle("hide", m !== "float");
+  if (m === "float" && window._floatFade) window._floatFade();
   var pgc = document.getElementById("pages");
-  if (pgc) pgc.style.paddingBottom = (m === "float") ? "66px" : "";
+  if (pgc) pgc.style.paddingBottom = (m === "float") ? "60px" : "";
   if (typeof paginate === "function" && typeof P !== "undefined" && P.length){
     setTimeout(function(){ paginate(true); }, 0);
   }
@@ -4420,10 +4452,19 @@ function applyFlipMode(m){
 (function(){
   var bar = document.createElement("div");
   bar.id = "floats"; bar.className = "hide";
-  bar.style.cssText = "position:fixed;left:0;right:0;bottom:10px;display:flex;gap:10px;padding:0 12px;z-index:70;pointer-events:none";
-  bar.innerHTML = '<button id="fPrev" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">上一页</button>'
-    + '<button id="fNext" type="button" style="pointer-events:auto;flex:1;height:50px;font-size:15px;opacity:.9;border-radius:12px">下一页</button>';
+  bar.style.cssText = "position:fixed;right:10px;bottom:14px;display:flex;gap:8px;z-index:70;pointer-events:none;transition:opacity .25s";
+  bar.innerHTML = '<button id="fPrev" type="button" title="上一页" aria-label="上一页" style="pointer-events:auto;width:46px;height:46px;border-radius:50%;font-size:14px;line-height:1;opacity:.95;box-shadow:0 1px 4px rgba(0,0,0,.22)">上页</button>'
+    + '<button id="fNext" type="button" title="下一页" aria-label="下一页" style="pointer-events:auto;width:46px;height:46px;border-radius:50%;font-size:14px;line-height:1;opacity:.95;box-shadow:0 1px 4px rgba(0,0,0,.22)">下页</button>';
   document.body.appendChild(bar);
+  var _fT = null;
+  window._floatFade = function(){
+    bar.style.opacity = "1";
+    clearTimeout(_fT);
+    _fT = setTimeout(function(){ if (FLIP_MODE === "float") bar.style.opacity = "0.35"; }, 3000);
+  };
+  document.addEventListener("touchstart", window._floatFade, {passive: true});
+  document.addEventListener("mousedown", window._floatFade);
+  bar.addEventListener("touchstart", window._floatFade, {passive: true});
   document.getElementById("fPrev").onclick = function(){ panel.classList.add("hide"); flip("prev"); };
   document.getElementById("fNext").onclick = function(){ panel.classList.add("hide"); flip("next"); };
 })();
@@ -4646,8 +4687,14 @@ document.addEventListener("keydown", function(e){
   if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); flip("next"); }
   else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); flip("prev"); }
 });
-function tapZone(x, w){
-  if (FLIP_MODE === "one"){ if (x < w * 0.5) flip("prev"); else flip("next"); return; }
+function tapZone(x, w, y, h){
+  if (FLIP_MODE === "one"){
+    /* 单手：上半屏上一页、下半屏下一页（竖向分区，拇指点按更顺手） */
+    var hh = (typeof h === "number" && h > 0) ? h : 1;
+    var yy = (typeof y === "number") ? y : 0;
+    if (yy < hh * 0.5) flip("prev"); else flip("next");
+    return;
+  }
   if (x < w * 0.38) flip("prev");
   else if (x > w * 0.62) flip("next");
 }
@@ -4675,13 +4722,19 @@ rendition.hooks.content.register(function(contents){
   }, {passive:true});
   doc.addEventListener("click", function(e){
     if (Date.now() - tMoved < 400) return;   /* 滑动之后紧跟的 click 不算点按 */
+    if (!panel.classList.contains("hide")){ panel.classList.add("hide"); return; }
     var t = e.target;
     while (t && t.nodeType === 1){ if (t.tagName === "A") return; t = t.parentNode; }
     /* 内页是多列布局：iframe 宽度常是视口的两倍，坐标要换算回外层视口口径 */
-    var L = 0;
-    try { var fe = contents.window.frameElement; if (fe) L = fe.getBoundingClientRect().left; } catch(err) {}
-    var vw = document.getElementById("viewer").clientWidth || 1;
-    tapZone(e.clientX + L - 0, vw);
+    var L = 0, T = 0;
+    try {
+      var fe = contents.window.frameElement;
+      if (fe) { var fr = fe.getBoundingClientRect(); L = fr.left; T = fr.top; }
+    } catch(err) {}
+    var V = document.getElementById("viewer");
+    var vr = V.getBoundingClientRect();
+    tapZone(e.clientX + L - vr.left, V.clientWidth || 1,
+            e.clientY + T - vr.top, V.clientHeight || 1);
   }, false);
   /* EPUB 正文在 iframe 里，滚轮事件要先落到内容层才拿得到 */
   doc.addEventListener("wheel", function(e){
@@ -4696,8 +4749,10 @@ rendition.hooks.content.register(function(contents){
 (function(){
   var v = document.getElementById("viewer");
   v.addEventListener("click", function(e){
+    if (panel && !panel.classList.contains("hide")){ panel.classList.add("hide"); return; }
     var r = v.getBoundingClientRect();
-    tapZone(e.clientX - r.left, v.clientWidth || 1);
+    tapZone(e.clientX - r.left, v.clientWidth || 1,
+            e.clientY - r.top, v.clientHeight || 1);
   });
 })();
 
